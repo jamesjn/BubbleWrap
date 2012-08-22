@@ -2,6 +2,7 @@ describe "HTTP" do
 
   before do
     @localhost_url = 'http://localhost'
+    @fake_url = 'http://fake.url'
   end
 
   describe "Core HTTP method calls" do
@@ -31,7 +32,7 @@ describe "HTTP" do
       [:get, :post, :put, :delete, :head, :patch].each do |method|
         called = false
         expected_delegator = Proc.new {|response| called = true }
-        
+
         query = BubbleWrap::HTTP.send(method, @localhost_url, { action: 'not_valid' }, &expected_delegator)
         query.connectionDidFinishLoading(query.connection)
 
@@ -148,6 +149,18 @@ describe "HTTP" do
         @query.method.should.equal "GET"
       end
 
+      it "throws an error for invalid/missing URL schemes" do
+        %w(http https file ftp).each do |scheme|
+          lambda {
+            BW::HTTP::Query.new("#{scheme}://example.com", :get) { |r| p r.body.to_str }
+          }.should.not.raise InvalidURLError
+        end
+
+        lambda {
+          BW::HTTP::Query.new("bad://example.com", :get) { |r| p r.body.to_str }
+        }.should.raise InvalidURLError
+      end
+
       it "should set the deleted delegator from options" do
         @query.instance_variable_get(:@delegator).should.equal @action
         @options.should.not.has_key? :action
@@ -183,7 +196,7 @@ describe "HTTP" do
       describe "PAYLOAD / UPLOAD FILES" do
 
         def create_query(payload, files)
-          BubbleWrap::HTTP::Query.new( '', :post, { payload: payload, files: files } )
+          BubbleWrap::HTTP::Query.new( 'http://haha', :post, { payload: payload, files: files } )
         end
 
         def sample_data
@@ -197,13 +210,13 @@ describe "HTTP" do
         end
 
         it "should check if @payload is a hash before generating GET params" do
-          query_string_payload = BubbleWrap::HTTP::Query.new( 'nil' , :get,  { payload: "name=apple&model=macbook"} )
+          query_string_payload = BubbleWrap::HTTP::Query.new( @fake_url , :get,  { payload: "name=apple&model=macbook"} )
           query_string_payload.instance_variable_get(:@payload).should.equal 'name=apple&model=macbook'
         end
 
         it "should check if payload is nil" do
           lambda{
-            BubbleWrap::HTTP::Query.new( 'nil' , :post, {} )
+            BubbleWrap::HTTP::Query.new( @fake_url , :post, {} )
           }.should.not.raise NoMethodError
         end
 
@@ -227,7 +240,7 @@ describe "HTTP" do
           puts "\n"
           [:post, :put, :delete, :patch].each do |method|
             puts "    - #{method}\n"
-            query = BubbleWrap::HTTP::Query.new( 'nil' , method, { payload: payload, files: files } )
+            query = BubbleWrap::HTTP::Query.new( @fake_url , method, { payload: payload, files: files } )
             uuid = query.instance_variable_get(:@boundary)
             real_payload = NSString.alloc.initWithData(query.request.HTTPBody, encoding:NSUTF8StringEncoding)
             real_payload.should.equal "--#{uuid}\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\napple\r\n--#{uuid}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nmacbook\r\n--#{uuid}\r\nContent-Disposition: form-data; name=\"twitter\"; filename=\"twitter\"\r\nContent-Type: application/octet-stream\r\n\r\ntwitter:@mneorr\r\n--#{uuid}\r\nContent-Disposition: form-data; name=\"site\"; filename=\"site\"\r\nContent-Type: application/octet-stream\r\n\r\nmneorr.com\r\n--#{uuid}--\r\n"
@@ -235,7 +248,7 @@ describe "HTTP" do
 
           [:get, :head].each do |method|
             puts "    - #{method}\n"
-            query = BubbleWrap::HTTP::Query.new( 'nil' , method, { payload: payload } )
+            query = BubbleWrap::HTTP::Query.new( @fake_url , method, { payload: payload } )
             real_payload = NSString.alloc.initWithData(query.request.HTTPBody, encoding:NSUTF8StringEncoding)
             real_payload.should.be.empty
           end
@@ -251,7 +264,7 @@ describe "HTTP" do
           puts "\n"
           [:put, :post, :delete, :patch].each do |method|
             puts "    - #{method}\n"
-            query = BubbleWrap::HTTP::Query.new( 'nil' , method, { payload: json } )
+            query = BubbleWrap::HTTP::Query.new( @fake_url , method, { payload: json } )
             set_payload = NSString.alloc.initWithData(query.request.HTTPBody, encoding:NSUTF8StringEncoding)
             set_payload.should.equal json
           end
@@ -259,7 +272,7 @@ describe "HTTP" do
 
         it "sets the payload for a nested hash to multiple form-data parts" do
           payload = { computer: { name: 'apple', model: 'macbook'} }
-          query = BubbleWrap::HTTP::Query.new( 'nil', :post, { payload: payload } )
+          query = BubbleWrap::HTTP::Query.new( @fake_url, :post, { payload: payload } )
           uuid = query.instance_variable_get(:@boundary)
           real_payload = NSString.alloc.initWithData(query.request.HTTPBody, encoding:NSUTF8StringEncoding)
           real_payload.should.equal "--#{uuid}\r\nContent-Disposition: form-data; name=\"computer[name]\"\r\n\r\napple\r\n--#{uuid}\r\nContent-Disposition: form-data; name=\"computer[model]\"\r\n\r\nmacbook\r\n--#{uuid}--\r\n"
@@ -278,7 +291,7 @@ describe "HTTP" do
       end
 
       it "should delete :headers from options and escape Line Feeds" do
-        escaped_lf = {"User-Agent"=>"Mozilla/5.0 (X11; Linux x86_64; rv:12.0) \\n Gecko/20100101 Firefox/12.0"}
+        escaped_lf = {"User-Agent"=>"Mozilla/5.0 (X11; Linux x86_64; rv:12.0) \r\n Gecko/20100101 Firefox/12.0"}
         @query.instance_variable_get(:@headers).should.equal escaped_lf
       end
 
@@ -360,6 +373,11 @@ describe "HTTP" do
         @post_query = BubbleWrap::HTTP::Query.new(@url_string, :post, {headers: @headers, payload: @payload})
       end
 
+      it "should add default Content Type if no payload is given" do
+        query_without_payload = BubbleWrap::HTTP::Query.new(@url_string, :post, {headers: @headers})
+        query_without_payload.request.allHTTPHeaderFields.should.include? 'Content-Type'
+      end
+
       it "should automatically provide Content-Type if a payload is provided" do
         @post_query.request.allHTTPHeaderFields.should.include?('Content-Type')
       end
@@ -384,11 +402,6 @@ describe "HTTP" do
         @headers = { fake: 'headers', 'CONTENT-TYPE' => 'x-banana' }
         @post_query = BubbleWrap::HTTP::Query.new(@url_string, :post, {headers: @headers, payload: @payload})
         @post_query.request.allHTTPHeaderFields['CONTENT-TYPE'].should.equal @headers['CONTENT-TYPE']
-      end
-
-      it "should not add additional headers if no payload is given" do
-        @post_query = BubbleWrap::HTTP::Query.new(@url_string, :post, {headers: @headers})
-        @post_query.request.allHTTPHeaderFields.should.equal @headers
       end
 
     end
